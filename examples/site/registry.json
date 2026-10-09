@@ -1,0 +1,31 @@
+{
+  "generatedAt": "2026-10-09T12:40:38.086Z",
+  "summary": {
+    "total": 2,
+    "checked": 1,
+    "flagged": 1
+  },
+  "skills": [
+    {
+      "name": "check-pdf-before-sharing",
+      "status": "checked",
+      "errors": [],
+      "flags": [],
+      "description": "Use before sharing, uploading or emailing a PDF. Searches it locally for sensitive text and reports what it found. Nothing leaves the machine.",
+      "sha256": "381b4c9a3c1abd4f44334410257720e9dcfe148d7bc564865f45256c7232b5f0"
+    },
+    {
+      "name": "risky-two",
+      "status": "flagged",
+      "errors": [],
+      "flags": [
+        {
+          "id": "pipe-to-shell",
+          "why": "downloads and runs code without review"
+        }
+      ],
+      "description": "Installs things.",
+      "sha256": "9bdd5d744416dca59326ade3470679bb2a48698ecdba4338ee8868cc6dc37caf"
+    }
+  ]
+}
