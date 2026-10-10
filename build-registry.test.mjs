@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkSkill, parseFrontmatter, renderHtml } from './build-registry.mjs';
+import { checkSkill, parseFrontmatter, renderHtml, buildRegistry } from './build-registry.mjs';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,6 +66,33 @@ test('PowerShell runtime code, base64-decode-to-shell and world-writable chmod a
   assert.ok(b64.flags.some((f) => f.id === 'decode-and-run'));
   const chmod = checkSkill('x', 'perm', fm('perm') + 'Then run chmod -R 777 ./data\n');
   assert.ok(chmod.flags.some((f) => f.id === 'chmod-world-writable'));
+});
+
+test('UTF-8 bytes, missing files and empty registries cannot report a clean success', () => {
+  const r = checkSkill('x', 'unicode', fm('unicode') + 'é'.repeat(10000));
+  assert.ok(r.errors.some((e) => e.includes('20 KB')));
+  const root = mkdtempSync(join(tmpdir(), 'registry-sec-'));
+  assert.throws(() => buildRegistry(root), /no skills/);
+  mkdirSync(join(root, 'missing'));
+  const built = buildRegistry(root);
+  assert.equal(built.summary.flagged, 1);
+  assert.equal(built.skills[0].sha256, null);
+  assert.ok(renderHtml(built).includes('digest unavailable'));
+});
+
+test('symlinked skill folders cannot read outside source root', () => {
+  const root = mkdtempSync(join(tmpdir(), 'registry-junction-'));
+  const outside = mkdtempSync(join(tmpdir(), 'registry-outside-'));
+  writeFileSync(join(outside, 'SKILL.md'), fm('outside'));
+  symlinkSync(outside, join(root, 'outside'), 'junction');
+  assert.throws(() => buildRegistry(root), /symlink/);
+});
+
+test('status attributes and hashes cannot inject HTML; hidden cards use explicit CSS', () => {
+  const html = renderHtml({ summary: { total: 1, checked: 0, flagged: 1 }, skills: [{ name: 'x', description: 'x', status: '\" onclick=\"alert(1)', sha256: '<img src=x>', errors: [], flags: [] }] });
+  assert.ok(!html.includes('onclick=') && !html.includes('<img src=x>'));
+  assert.ok(html.includes('[hidden]{display:none!important}'));
+  assert.ok(html.includes('Content-Security-Policy'));
 });
 
 test('CLI: a missing skills folder exits 2 with one line, not a stack trace', () => {

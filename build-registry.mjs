@@ -17,8 +17,9 @@
  * Exit: 0 all checked · 1 any flagged · 2 usage error
  */
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, existsSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, readdirSync, existsSync, statSync, writeFileSync, mkdirSync, lstatSync, realpathSync } from 'node:fs';
+import { join, resolve, dirname, basename } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 export const MAX_SKILL_BYTES = 20000;
 
@@ -37,7 +38,7 @@ export function parseFrontmatter(text) {
   // Normalize CRLF first: Windows checkouts would otherwise look like they have no frontmatter.
   const m = /^---\n([\s\S]*?)\n---\n?/.exec(text.replace(/\r\n/g, '\n'));
   if (!m) return null;
-  const get = (k) => (new RegExp(`^${k}:\\s*(.+)$`, 'm').exec(m[1])?.[1] ?? '').trim();
+  const get = (k) => (new RegExp(`^${k}:[ \\t]*([^\\n]*)$`, 'm').exec(m[1])?.[1] ?? '').trim();
   return { name: get('name'), description: get('description') };
 }
 
@@ -50,7 +51,7 @@ export function checkSkill(folder, name, text) {
     if (fm.name !== name) errors.push(`frontmatter name "${fm.name}" does not match folder "${name}"`);
     if (!fm.description) errors.push('no description');
   }
-  if (text.length > MAX_SKILL_BYTES) errors.push(`SKILL.md is over ${MAX_SKILL_BYTES / 1000} KB; keep skills focused`);
+  if (Buffer.byteLength(text, 'utf8') > MAX_SKILL_BYTES) errors.push(`SKILL.md is over ${MAX_SKILL_BYTES / 1000} KB; keep skills focused`);
   for (const r of RISKY) if (r.re.test(text)) flags.push({ id: r.id, why: r.why });
   const status = errors.length || flags.length ? 'flagged' : 'checked';
   return { name, status, errors, flags, description: fm?.description ?? '' };
@@ -58,14 +59,29 @@ export function checkSkill(folder, name, text) {
 
 export function buildRegistry(skillsDir) {
   const entries = [];
-  for (const name of readdirSync(skillsDir).sort()) {
+  const children = readdirSync(skillsDir).sort();
+  if (children.length > 1000) throw new Error('at most 1000 skill folders');
+  for (const name of children) {
     const dir = join(skillsDir, name);
     const file = join(dir, 'SKILL.md');
-    if (!statSync(dir).isDirectory() || !existsSync(file)) continue;
+    const folderStat = lstatSync(dir);
+    if (folderStat.isSymbolicLink()) throw new Error(`symlinked skill folder refused: ${name}`);
+    if (!folderStat.isDirectory()) continue;
+    if (!existsSync(file)) {
+      entries.push({ name, status: 'flagged', description: '', errors: ['missing SKILL.md'], flags: [], sha256: null });
+      continue;
+    }
+    const fileStat = lstatSync(file);
+    if (!fileStat.isFile() || fileStat.isSymbolicLink()) throw new Error(`SKILL.md must be a regular non-symlink file: ${name}`);
+    if (fileStat.size > MAX_SKILL_BYTES) {
+      entries.push({ name, status: 'flagged', description: '', errors: [`SKILL.md is over ${MAX_SKILL_BYTES / 1000} KB; not read`], flags: [], sha256: null });
+      continue;
+    }
     const bytes = readFileSync(file);
     const entry = checkSkill(dir, name, bytes.toString('utf8'));
     entries.push({ ...entry, sha256: createHash('sha256').update(bytes).digest('hex') });
   }
+  if (!entries.length) throw new Error('no skills found; refusing an empty success');
   const summary = {
     total: entries.length,
     checked: entries.filter((e) => e.status === 'checked').length,
@@ -79,6 +95,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const STYLE = `
 :root{--bg:#0b0b0f;--panel:#17171f;--line:#26262f;--txt:#f5f5f7;--mut:#a7a7b3;--dim:#6d6d7a;--ok:#2dd4bf;--bad:#f87171}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;background:radial-gradient(60% 40% at 80% -10%,rgba(45,212,191,.16),transparent 70%),radial-gradient(50% 35% at 0% 0%,rgba(124,58,237,.18),transparent 70%),var(--bg);color:var(--txt);font:15px/1.55 system-ui,-apple-system,Segoe UI,sans-serif;min-height:100vh}
 header{padding:72px 6vw 28px;animation:rise .9s cubic-bezier(.22,1,.36,1) both}
 .kicker{letter-spacing:.18em;text-transform:uppercase;font-size:12px;color:var(--ok);margin:0 0 12px}
@@ -93,8 +110,8 @@ input[type=search]{flex:1 1 260px;background:var(--panel);color:var(--txt);borde
 input[type=search]:focus{border-color:var(--ok);box-shadow:0 0 0 3px rgba(45,212,191,.2)}
 .pill{background:transparent;color:var(--mut);border:1px solid var(--line);border-radius:999px;padding:8px 16px;font:inherit;cursor:pointer}
 .pill[aria-pressed=true]{color:var(--bg);background:var(--ok);border-color:var(--ok)}
-main{padding:28px 6vw 80px;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:18px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;display:flex;flex-direction:column;gap:12px;animation:rise .7s cubic-bezier(.22,1,.36,1) both;transition:transform .35s cubic-bezier(.22,1,.36,1),border-color .35s}
+main{padding:28px 6vw 80px;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:18px}
+.card{min-width:0;overflow-wrap:anywhere;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;display:flex;flex-direction:column;gap:12px;animation:rise .7s cubic-bezier(.22,1,.36,1) both;transition:transform .35s cubic-bezier(.22,1,.36,1),border-color .35s}
 .card:hover{transform:translateY(-4px);border-color:#3b3b48}
 .card h2{font-size:18px;margin:0;word-break:break-word}
 .badge{align-self:flex-start;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px}
@@ -124,6 +141,7 @@ const SCRIPT = `
   }
   btns.forEach(function(b){b.addEventListener('click',function(){filter=b.dataset.filter;btns.forEach(function(x){x.setAttribute('aria-pressed',String(x===b))});apply();});});
   q.addEventListener('input',apply);
+  apply();
 })();`;
 
 export function renderHtml(registry) {
@@ -138,12 +156,12 @@ export function renderHtml(registry) {
         ? notes.map((n) => `<li class="${n.bad ? 'bad' : ''}">${esc(n.text)}</li>`).join('')
         : '<li>No automated issues found</li>';
       const search = `${s.name} ${s.description}`.toLowerCase();
-      return `<article class="card ${s.status}" data-status="${s.status}" data-search="${esc(search)}">
+      return `<article class="card ${s.status === 'checked' ? 'checked' : 'flagged'}" data-status="${s.status === 'checked' ? 'checked' : 'flagged'}" data-search="${esc(search)}">
   <span class="badge">${s.status === 'checked' ? 'Checked' : 'Flagged'}</span>
   <h2>${esc(s.name)}</h2>
   <p class="desc">${esc(s.description || 'No description')}</p>
   <ul class="notes">${noteItems}</ul>
-  <span class="hash" title="Verify with: shasum -a 256 SKILL.md">sha256 ${s.sha256.slice(0, 16)}…</span>
+  <span class="hash" title="Verify with: shasum -a 256 SKILL.md">${s.sha256 ? `sha256 ${esc(s.sha256.slice(0, 16))}…` : 'digest unavailable (not read)'}</span>
 </article>`;
     })
     .join('\n');
@@ -151,6 +169,7 @@ export function renderHtml(registry) {
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'sha256-${createHash('sha256').update(STYLE).digest('base64')}'; script-src 'sha256-${createHash('sha256').update(SCRIPT).digest('base64')}'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Skills registry</title>
 <meta name="description" content="A reviewable index of agent skills with automated safety checks and SHA-256 digests.">
@@ -186,20 +205,27 @@ ${cards}
 
 function main() {
   const [skillsDir, outDir] = process.argv.slice(2);
-  if (!skillsDir || !outDir) {
+  if (!skillsDir || !outDir || process.argv.slice(2).length !== 2) {
     console.error('usage: node build-registry.mjs <skillsDir> <outDir>');
     process.exitCode = 2;
     return;
   }
+  const canonical = (p) => existsSync(p) ? realpathSync(p) : join(canonical(dirname(resolve(p))), basename(p));
+  const source = realpathSync(skillsDir);
+  const target = canonical(outDir);
+  if (target === source || target.startsWith(source + (process.platform === 'win32' ? '\\' : '/'))) throw new Error('output folder must be outside skills source');
+  for (const name of ['registry.json', 'registry.html']) {
+    try { lstatSync(join(outDir, name)); throw new Error('registry output already exists; choose a new output folder'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  }
   const registry = buildRegistry(skillsDir);
   mkdirSync(outDir, { recursive: true });
-  writeFileSync(join(outDir, 'registry.json'), JSON.stringify(registry, null, 2) + '\n');
-  writeFileSync(join(outDir, 'registry.html'), renderHtml(registry));
+  writeFileSync(join(outDir, 'registry.json'), JSON.stringify(registry, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+  writeFileSync(join(outDir, 'registry.html'), renderHtml(registry), { flag: 'wx', mode: 0o600 });
   console.log(`${registry.summary.checked} checked, ${registry.summary.flagged} flagged -> ${outDir}`);
   process.exitCode = registry.summary.flagged > 0 ? 1 : 0;
 }
 
-if (process.argv[1]?.endsWith('build-registry.mjs')) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   // A missing or unreadable skills folder exits 2 with one line, never a stack trace.
   try {
     main();

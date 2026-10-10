@@ -1,11 +1,30 @@
 {
   "name": "skills-registry",
-  "version": "1.1.0",
-  "description": "Static, searchable index of agent skills with automated risk checks and SHA-256 digests. Not a safety review.",
+  "version": "1.1.2",
+  "description": "Static agent-skill index with heuristic risk checks and SHA-256 digests; not a safety review.",
   "type": "module",
-  "bin": { "skills-registry": "build-registry.mjs" },
-  "scripts": { "test": "node --test build-registry.test.mjs" },
-  "engines": { "node": ">=20" },
-  "keywords": ["agent-skills", "registry", "security", "static-site"],
-  "license": "MIT"
+  "bin": {
+    "skills-registry": "build-registry.mjs"
+  },
+  "scripts": {
+    "test": "node --test build-registry.test.mjs",
+    "verify": "node --check build-registry.mjs && npm test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "agent-skills",
+    "registry",
+    "security",
+    "static-site"
+  ],
+  "license": "MIT",
+  "files": [
+    "build-registry.mjs",
+    "examples/",
+    "demo/",
+    "SECURITY.md",
+    "LICENSE"
+  ]
 }
