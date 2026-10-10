@@ -27,11 +27,15 @@ export const RISKY = [
   { id: 'rm-root', re: /rm\s+-rf?\s+(\/|~|\$HOME)(\s|$)/i, why: 'deletes from the root or home folder' },
   { id: 'credential-read', re: /(\.ssh|\.aws|\.npmrc|\.netrc|id_rsa|\.env\b)/i, why: 'mentions credential files' },
   { id: 'dynamic-eval', re: /\beval\s*\(|new Function\s*\(/i, why: 'evaluates dynamic code' },
+  { id: 'iex', re: /\b(Invoke-Expression|iex)\s*[(\$'"]/i, why: 'runs code built at runtime (PowerShell)' },
+  { id: 'decode-and-run', re: /base64\s+(-d|--decode)[^\n|]*\|\s*(sh|bash|zsh)\b/i, why: 'decodes a hidden payload and runs it' },
+  { id: 'chmod-world-writable', re: /chmod\s+(-R\s+)?777\b/i, why: 'makes files writable by everyone' },
   { id: 'long-base64', re: /[A-Za-z0-9+/]{200,}={0,2}/, why: 'contains a long encoded blob' },
 ];
 
 export function parseFrontmatter(text) {
-  const m = /^---\n([\s\S]*?)\n---\n?/.exec(text);
+  // Normalize CRLF first: Windows checkouts would otherwise look like they have no frontmatter.
+  const m = /^---\n([\s\S]*?)\n---\n?/.exec(text.replace(/\r\n/g, '\n'));
   if (!m) return null;
   const get = (k) => (new RegExp(`^${k}:\\s*(.+)$`, 'm').exec(m[1])?.[1] ?? '').trim();
   return { name: get('name'), description: get('description') };
@@ -180,11 +184,12 @@ ${cards}
 `;
 }
 
-if (process.argv[1]?.endsWith('build-registry.mjs')) {
+function main() {
   const [skillsDir, outDir] = process.argv.slice(2);
   if (!skillsDir || !outDir) {
     console.error('usage: node build-registry.mjs <skillsDir> <outDir>');
-    process.exit(2);
+    process.exitCode = 2;
+    return;
   }
   const registry = buildRegistry(skillsDir);
   mkdirSync(outDir, { recursive: true });
@@ -192,4 +197,14 @@ if (process.argv[1]?.endsWith('build-registry.mjs')) {
   writeFileSync(join(outDir, 'registry.html'), renderHtml(registry));
   console.log(`${registry.summary.checked} checked, ${registry.summary.flagged} flagged -> ${outDir}`);
   process.exitCode = registry.summary.flagged > 0 ? 1 : 0;
+}
+
+if (process.argv[1]?.endsWith('build-registry.mjs')) {
+  // A missing or unreadable skills folder exits 2 with one line, never a stack trace.
+  try {
+    main();
+  } catch (e) {
+    console.error(`cannot build registry: ${e.message}`);
+    process.exitCode = 2;
+  }
 }

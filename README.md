@@ -23,6 +23,8 @@ Agent skills are instructions that run with real permissions. Before you install
 node build-registry.mjs ./skills ./site
 ```
 
+Exit codes: `0` all skills checked, `1` one or more flagged, `2` the skills folder is missing or unreadable. Windows (CRLF) checkouts are parsed the same as LF.
+
 This writes two files:
 
 - `site/registry.json`: machine-readable, with status, notes and digests for every skill.
